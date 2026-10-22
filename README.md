@@ -1,7 +1,5 @@
 # Tiroir Tiroir
 
-Application Android de rappels (échéances, véhicules, tâches). Sans Internet, sans publicité.
+**Page de téléchargement : https://f3nnnx.github.io/tiroir-tiroir/**
 
-**Installer :** télécharger `Qdjar-Qdjar.apk` dans la page [Releases](../../releases/latest), puis suivre le [tuto PDF](Tiroir-Tiroir-installation.pdf).
-
-Version de démonstration (v1.2) ; la version finale sera fournie plus tard.
+Application Android de rappels (démo v1.2), sans Internet ni publicité. Tuto : [PDF](Tiroir-Tiroir-installation.pdf).
