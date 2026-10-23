@@ -7,8 +7,10 @@ const RIEN = 2147483647, CLE = 'tiroir-tiroir-demo-v1';
 function auj() { const n = new Date(); return Math.round(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) / 86400000); }
 function dt(ed) { return new Date(ed * 86400000); }               // lire avec getUTC*
 function p2(n) { return (n < 10 ? '0' : '') + n; }
-function fmt(ed) { const d = dt(ed); return p2(d.getUTCDate()) + '/' + p2(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear(); }
-function jm(ed, a) { const d = dt(ed); return p2(d.getUTCDate()) + '/' + p2(d.getUTCMonth() + 1) + (d.getUTCFullYear() === dt(a).getUTCFullYear() ? '' : '/' + d.getUTCFullYear()); }
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+// « 28 octobre » ; l'année (« 28 octobre 2027 ») seulement si ce n'est pas l'année en cours. Le stockage ne change pas.
+function jm(ed, a) { const d = dt(ed); return d.getUTCDate() + ' ' + MOIS[d.getUTCMonth()] + (d.getUTCFullYear() === dt(a).getUTCFullYear() ? '' : ' ' + d.getUTCFullYear()); }
+function fmt(ed) { return jm(ed, auj()); }
 function iso(ed) { const d = dt(ed); return d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()); }
 function deIso(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000) : 0; }
 function lgMois(y, m) { return new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); }
@@ -38,7 +40,7 @@ function ajoutDossier(parent, nom, ex) {
   if (ex) x.ex = true; D.dossiers.push(x); return x;
 }
 function nouvelItem(dossier, type) {
-  const i = { id: D.suivant++, dossier, type, nom: '', designation: 'la facture', lien: '', niveaux: '30,15,7,2,0',
+  const i = { id: D.suivant++, dossier, type, nom: '', designation: '', lien: '', niveaux: '30,15,7,2,0',
     periode: 3, jour: 1, mois: true, ref: 0, prec: 0, montant: 0, intervalle: 10000, kmDernier: 0,
     kmActuel: 0, kmSem: 0, kmDate: auj(), qDate: auj(), s1: 1000, s2: 300, question: true, envoye: RIEN };
   if (type !== 'K') { const r = auj() + 30; i.ref = r; i.jour = jourDuMois(r); }
@@ -68,9 +70,9 @@ function exemples() {
   e(fact, 'Eau', { periode: 3, ref: a + 11 });
   e(maison, 'Loyer', { designation: 'le loyer', montant: 45000, periode: 1, ref: a + 1 });
   e(travail, 'Agrément sanitaire', { designation: "l'agrément sanitaire", periode: 6, ref: a + 75 });
-  e(voiture, 'Assurance auto', { designation: "l'assurance", montant: 32000, periode: 6, ref: a - 3 });
   const v = ajoutDossier(voiture.id, 'Ma voiture', true); v.vehicule = true; v.kmActuel = 48200; v.kmSem = 220; v.kmDate = a - 21; v.qDate = a;
   const k = (nom, o) => { const i = nouvelItem(v.id, 'K'); i.nom = nom; i.ex = true; Object.assign(i, o); D.items.push(i); };
+  e(v, 'Assurance auto', { montant: 32000, periode: 6, ref: a - 3 });
   k('Vidange', { intervalle: 10000, kmDernier: 39800 });
   k('Plaquettes de frein', { intervalle: 30000, kmDernier: 20000 });
 }
@@ -140,6 +142,21 @@ function statut(it, a) {
   if (d === 0) return "Échéance aujourd'hui" + m;
   if (d === 1) return 'Demain' + s + m;
   return 'Dans ' + nb(d) + ' jours' + s + m;
+}
+// ---------- liste « À venir » ----------
+function quand(it, a) { if (!estK(it)) return it.ref; if (reste(it, a) <= 0) return a; return vers(it, a); }
+function urgence(it, a) {       // 2 = en retard (rouge), 1 = proche (orange), 0 = pas pressé
+  if (retard(it, a)) return 2;
+  if (!estK(it)) return jours(it, a) <= 14 ? 1 : 0;
+  const v = vers(it, a);
+  return reste(it, a) <= it.s1 || (v !== null && v - a <= 14) ? 1 : 0;
+}
+function ligne(it, a) {         // [date, action] : « 28 octobre : Agrément Sanitaire » ; km : « date estimée : action – Véhicule »
+  const veh = vehiculeDe(it.dossier), suf = veh && estK(it) ? ' – ' + veh.nom : '';
+  if (estK(it) && retard(it, a)) return ['maintenant', it.nom + suf];
+  const q = quand(it, a);
+  if (q === null) return ['à ' + nb(it.kmDernier + it.intervalle) + ' km', it.nom + suf];
+  return [jm(q, a), it.nom + suf];
 }
 function couleur(it, a) { if (retard(it, a)) return 'rouge'; const n = niveau(it, a); return n !== RIEN && urgent(it, n) ? 'orange' : ''; }
 function resume(id) {
@@ -216,10 +233,15 @@ window.addEventListener('popstate', e => {
 });
 
 function page(titre, avecRetour) {
-  const p = APP(); p.replaceChildren();
+  const p = APP(); p.replaceChildren(); document.documentElement.classList.remove('epure');
   if (avecRetour) p.append(btn('‹ Retour', 'poignee', () => retour(1)));
   p.append(h('h1', {}, titre));
   return p;
+}
+function echoDate(inp) {      // la date choisie, écrite « 28 octobre », sous le sélecteur du navigateur
+  const e = h('p', { class: 'echo' });
+  const maj = () => { const d = deIso(inp.value); e.textContent = d ? jm(d, auj()) : ''; };
+  inp.addEventListener('input', maj); inp.addEventListener('change', maj); maj(); return e;
 }
 function champ(p, lab, val, type, extra) {
   p.append(h('label', { class: 'lab' }, lab));
@@ -249,28 +271,28 @@ function accueil() {
 function dossierEcran(id) {
   const cur = dossier(id); if (!cur) { retour(1); return; }
   const p = page(chemin(id), true), a = auj();
-  if (cur.vehicule) {
-    p.append(h('p', { class: 't' }, infoVehicule(cur, a)));
-    p.append(btn('Modifier le véhicule (km, moyenne)', 'poignee', () => aller(() => formVehicule(id, cur.parent))));
-  }
-  enfants(id).forEach(s => p.append(tiroir(s.nom, (s.vehicule ? infoVehicule(s, a) + '\n' : '') + resume(s.id), couleurDossier(s.id),
-    () => aller(() => dossierEcran(s.id)), () => actionsDossier(s.id))));
+  const voitures = cur.parent === 0 && cur.nom.toLowerCase() === 'voiture';
+  if (cur.vehicule) p.append(h('p', { class: 't' }, infoVehicule(cur, a)));
+  // Niveau « Voiture » : les véhicules seulement (d'anciens éléments / sous-tiroirs éventuels restent visibles en dessous).
+  const sous = s => tiroir(s.nom, (s.vehicule ? infoVehicule(s, a) + '\n' : '') + resume(s.id), couleurDossier(s.id), () => aller(() => dossierEcran(s.id)), () => actionsDossier(s.id));
+  enfants(id).filter(s => !voitures || s.vehicule).forEach(s => p.append(sous(s)));
+  if (voitures) enfants(id).filter(s => !s.vehicule).forEach(s => p.append(sous(s)));
   itemsDe(id).forEach(it => p.append(tiroir(it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)))));
-  if (!enfants(id).length && !itemsDe(id).length) p.append(h('p', { class: 't' }, 'Ce tiroir est vide.'));
-  p.append(btn('+ Ajouter un sous-tiroir', 'poignee', () => saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); })));
-  if (cur.parent === 0 && cur.nom.toLowerCase() === 'voiture') {
+  if (voitures) {
+    if (!enfants(id).length) p.append(h('p', { class: 't' }, "Aucun véhicule pour l'instant."));
+    if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));
     p.append(btn('+ Ajouter un véhicule', '', () => aller(() => formVehicule(0, id))));
-    p.append(btn('Options', 'poignee', () => {
-      const vs = D.dossiers.filter(s => s.vehicule && vehiculeDe(s.id) === s && sousVoiture(s));
-      choix('Options', ['Ajouter un véhicule'].concat(vs.map(s => 'Modifier : ' + s.nom)), w => {
-        if (w === 0) aller(() => formVehicule(0, id)); else { const s = vs[w - 1]; aller(() => formVehicule(s.id, s.parent)); }
-      });
-    }));
+    return;
   }
+  if (!enfants(id).length && !itemsDe(id).length) p.append(h('p', { class: 't' }, 'Ce tiroir est vide.'));
+  const types = ['Échéance (facture, assurance, contrôle...)', 'Kilométrage (vidange, distribution...)'];
+  const dansVehicule = !!vehiculeDe(id);
   p.append(btn('+ Ajouter un élément', 'poignee', () => choix("Quel type d'élément ?",
-    ['Échéance (facture, assurance, contrôle...)', 'Kilométrage (vidange, distribution...)'], w => aller(() => formulaire(0, id, w === 0 ? 'E' : 'K')))));
+    dansVehicule ? types : types.concat(['Un sous-tiroir (pour regrouper)']),
+    w => { if (w === 2) saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); }); else aller(() => formulaire(0, id, w === 0 ? 'E' : 'K')); })));
   if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));
-  if (cur.parent !== 0) p.append(h('p', { class: 'petit' }, 'Astuce : appui long sur un sous-tiroir pour le renommer ou le supprimer.'));
+  if (cur.vehicule) p.append(h('a', { class: 'reglages', role: 'button', tabindex: 0, onclick: () => aller(() => formVehicule(id, cur.parent)) }, 'Réglages du véhicule'));
+  else if (cur.parent !== 0) p.append(h('p', { class: 'petit' }, 'Astuce : appui long sur un sous-tiroir pour le renommer ou le supprimer.'));
 }
 
 function actionsDossier(id) {
@@ -307,9 +329,14 @@ function formVehicule(id, parent) {
 
 function avenir(rac) {
   const r = dossier(rac), p = page(r ? 'À venir : ' + r.nom : 'À venir', true), a = auj();
+  document.documentElement.classList.add('epure');
   const l = sousArbre(rac).sort((x, y) => score(x, a) - score(y, a));
   if (!l.length) p.append(h('p', { class: 't' }, 'Rien à venir. Ajoutez des éléments dans les tiroirs.'));
-  l.forEach(it => p.append(tiroir(it.nom, chemin(it.dossier) + '\n' + statut(it, a), couleur(it, a), () => aller(() => detail(it.id)))));
+  l.forEach(it => {
+    const u = urgence(it, a), [d, act] = ligne(it, a);
+    p.append(h('div', { class: 'lig u' + u, role: 'button', tabindex: 0, onclick: () => aller(() => detail(it.id)) },
+      h('span', { class: 'd' }, d), ' : ', h('b', {}, act)));
+  });
 }
 
 function detail(id) {
@@ -351,19 +378,18 @@ function formulaire(itemId, dossierId, type) {
   const ex = item(itemId), it = ex || nouvelItem(dossierId, type), km = estK(it), veh = vehiculeDe(it.dossier);
   const p = page(ex ? 'Modifier' : 'Nouvel élément', true);
   const nom = champ(p, 'Nom (ex. ' + (km ? 'Vidange' : 'Sonelgaz') + ')', it.nom, 'text');
-  let des, mont, per, lien, interv, kd, ka, ks, s1, s2, q, mois = it.mois, cb = [], prec, ref;
+  let mont, per, lien, interv, kd, ka, ks, s1, s2, q, mois = it.mois, cb = [], prec, ref;
   const niv = [30, 15, 7, 2, 0];
   if (!km) {
-    des = champ(p, "Comment l'appeler dans les messages (la facture, l'assurance, le loyer...)", it.designation, 'text');
     mont = champ(p, 'Montant estimé en DA (facultatif)', it.montant > 0 ? it.montant : '', 'num');
     p.append(h('label', { class: 'lab' }, 'Revient tous les'));
     per = h('input', { type: 'text', inputmode: 'numeric', value: it.periode });
     const u = btn(mois ? 'mois' : 'jours', 'poignee', () => { mois = !mois; u.textContent = mois ? 'mois' : 'jours'; });
     p.append(h('div', { class: 'ligne' }, per, u));
     p.append(h('label', { class: 'lab' }, 'Date de la précédente échéance (facultatif)'));
-    prec = h('input', { type: 'date', value: it.prec ? iso(it.prec) : '' }); p.append(prec);
+    prec = h('input', { type: 'date', value: it.prec ? iso(it.prec) : '' }); p.append(prec, echoDate(prec));
     p.append(h('label', { class: 'lab' }, 'Date de la prochaine échéance (date de référence)'));
-    ref = h('input', { type: 'date', value: it.ref ? iso(it.ref) : '' }); p.append(ref);
+    ref = h('input', { type: 'date', value: it.ref ? iso(it.ref) : '' }); p.append(ref, echoDate(ref));
     lien = champ(p, 'Lien de paiement en ligne (facultatif)', it.lien, 'url');
     p.append(h('p', { class: 't', style: 'font-weight:bold' }, 'Me rappeler :'));
     ['30 jours avant', '15 jours avant', '7 jours avant', '2 jours avant', 'Le jour même'].forEach((l, i) => {
@@ -389,7 +415,6 @@ function formulaire(itemId, dossierId, type) {
       it.periode = pe; it.mois = mois;
       if (r !== it.ref) it.jour = jourDuMois(r);
       it.ref = r; it.prec = deIso(prec.value);
-      it.designation = des.value.trim() || 'la facture';
       it.montant = num(mont.value); it.lien = lien.value.trim();
       it.niveaux = niv.filter((_, i) => cb[i].checked).join(',');
     } else {
