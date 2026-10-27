@@ -1,7 +1,7 @@
 'use strict';
 /* Tiroir Tiroir : version web de démonstration. Port fidèle de Compteur/Item/Donnees/Principal (Java).
    Données : localStorage uniquement (rien ne quitte l'appareil). */
-const RIEN = 2147483647, CLE = 'tiroir-tiroir-demo-v1';
+const RIEN = 2147483647, CLE = 'tiroir-tiroir-demo-v1', PRINC = ['Maison', 'Travail', 'Voiture', 'Santé', 'Autres'];
 
 // ---------- dates (jours depuis 1970, comme LocalDate.toEpochDay) ----------
 function auj() { const n = new Date(); return Math.round(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) / 86400000); }
@@ -30,9 +30,9 @@ function num(s) { s = String(s || '').replace(/[^0-9]/g, ''); if (s.length > 12)
 let D = null;
 function sauver() { try { localStorage.setItem(CLE, JSON.stringify(D)); } catch (e) { /* stockage plein ou refusé */ } }
 function charger() {
-  try { const t = localStorage.getItem(CLE); if (t) { const o = JSON.parse(t); if (o && o.dossiers && o.items) { D = o; if (!D.dossiers.some(x => x.parent === 0 && x.nom.toLowerCase() === 'santé')) { ajoutDossier(0, 'Santé'); sauver(); } return; } } } catch (e) { /* corrompu : on repart */ }
+  try { const t = localStorage.getItem(CLE); if (t) { const o = JSON.parse(t); if (o && o.dossiers && o.items) { D = o; D.dossiers.forEach(x => { if (x.parent === 0 && x.nom.toLowerCase() === 'autre') x.nom = 'Autres'; }); PRINC.forEach(n => { if (!D.dossiers.some(x => x.parent === 0 && x.nom.toLowerCase() === n.toLowerCase())) ajoutDossier(0, n); }); sauver(); return; } } } catch (e) { /* corrompu : on repart */ }
   D = { suivant: 1, dossiers: [], items: [] };
-  ['Maison', 'Travail', 'Voiture', 'Santé', 'Autre'].forEach(n => ajoutDossier(0, n));
+  PRINC.forEach(n => ajoutDossier(0, n));
   exemples(); sauver();
 }
 function ajoutDossier(parent, nom, ex) {
@@ -158,9 +158,11 @@ function ligne(it, a) {         // [date, action] : « 28 octobre : Agrément Sa
   if (q === null) return ['à ' + nb(it.kmDernier + it.intervalle) + ' km', it.nom + suf];
   return [jm(q, a), it.nom + suf];
 }
-const alerte = (it, a) => { if (retard(it, a)) return 2; if (estK(it)) return reste(it, a) <= it.s2 ? 2 : reste(it, a) <= it.s1 ? 1 : 0; const j = jours(it, a); return j < 7 ? 2 : j <= 15 ? 1 : 0; };
-const TEINTES = ['gris', 'orange', 'rouge'];
+// v1.5 : rouge = en retard ou <= 7 j ou < 1 000 km ; orange = <= 30 j ou < 3 000 km ; sinon vert
+const alerte = (it, a) => { if (retard(it, a)) return 2; if (estK(it)) { const r = reste(it, a); return r < 1000 ? 2 : r < 3000 ? 1 : 0; } const j = jours(it, a); return j <= 7 ? 2 : j <= 30 ? 1 : 0; };
+const TEINTES = ['vertok', 'orange', 'rouge'];
 const couleur = (it, a) => TEINTES[alerte(it, a)];
+function prochaine(it, a) { return estK(it) ? nb(actuel(it, a) + it.intervalle) + ' km' : fmt(suivant(it)); }
 function emoji(it) {
   const n = it.nom.toLowerCase();
   const t = [['sonelgaz', '⚡'], ['électr', '⚡'], ['elec', '⚡'], ['gaz', '🔥'], ['eau', '💧'], ['seaal', '💧'], ['internet', '🌐'], ['wifi', '🌐'], ['téléphone', '📱'], ['telephone', '📱'], ['mobile', '📱'], ['loyer', '🏠'], ['assurance', '🛡️'], ['vidange', '🛢️'], ['pneu', '🛞'], ['contrôle', '🔧'], ['controle', '🔧'], ['distribution', '⚙️'], ['impôt', '🧾'], ['impot', '🧾'], ['taxe', '🧾'], ['médecin', '🩺'], ['dent', '🦷'], ['vaccin', '💉']];
@@ -182,15 +184,33 @@ function resume(id) {
   const [d, act] = ligne(best, a);
   return alerte(best, a) > 0 || r > 0 ? d + ' · ' + act + '\n' + n : n;
 }
-const couleurDossier = id => TEINTES[Math.max(0, ...sousArbre(id).map(x => alerte(x, auj())))];
-const POINTS = { maison: 'vertok', travail: 'cyan', voiture: 'orange', 'santé': 'bleu', sante: 'bleu' };
-const pointDossier = r => r.parent === 0 ? (POINTS[r.nom.toLowerCase()] || 'gris') : couleurDossier(r.id);
-let onglet = 0;
-function marquerFait(it) {
-  const a = auj();
-  const suite = estK(it) ? 'Le prochain sera à ' + nb(actuel(it, a) + it.intervalle) + ' km.' : 'La prochaine échéance sera le ' + fmt(suivant(it)) + '.';
-  confirmer('Marquer « ' + it.nom + ' » comme ' + (estK(it) ? 'fait' : 'payé') + ' ? ' + suite, () => { paye(it); sauver(); rafraichir(); });
+const couleurDossier = id => { const l = sousArbre(id); return l.length ? TEINTES[Math.max(...l.map(x => alerte(x, auj())))] : 'gris'; };
+const pointDossier = r => couleurDossier(r.id);
+function marquerFait(it, apres) {
+  confirmer2('Confirmer la réalisation de cette tâche ?', emoji(it) + ' ' + it.nom + '\n\nProchaine échéance recalculée le : ' + prochaine(it, auj()) + '.', () => { paye(it); sauver(); badgeFait(); if (apres) apres(); else rafraichir(); }, apres && (() => apres(true)));
 }
+function badgeFait() { const b = h('div', { id: 'badge' }, '✓ Fait !'); document.body.append(b); setTimeout(() => b.remove(), 1600); }
+// ---------- overlay d'urgence ----------
+const repKey = c => 'tt-rep-' + c;
+const reportee = c => localStorage.getItem(repKey(c)) === String(auj());
+function urgences() {
+  const a = auj();
+  return D.items.filter(x => alerte(x, a) === 2 && !reportee('i' + x.id)).sort((x, y) => score(x, a) - score(y, a));
+}
+function overlay(l, i) {
+  if (i >= l.length) { rafraichir(); return; }
+  const it = l[i], a = auj(), c = 'i' + it.id;
+  const m = document.getElementById('modal');
+  m.replaceChildren(h('div', { class: 'b ov' },
+    h('div', { class: 'ovt' }, 'URGENT' + (l.length > 1 ? '  ·  ' + (i + 1) + ' / ' + l.length : '')),
+    h('div', { class: 'ovn' }, emoji(it) + '  ' + it.nom),
+    h('div', { class: 'ovs ' + couleur(it, a) }, statut(it, a)),
+    h('div', { class: 'petit' }, chemin(it.dossier)),
+    h('button', { class: 'rouge', onclick: () => { fermer(); marquerFait(it, () => overlay(l, i + 1)); } }, 'Urgent / Valider'),
+    h('button', { class: 'contour', onclick: () => { localStorage.setItem(repKey(c), String(auj())); overlay(l, i + 1); } }, 'Reporter à plus tard')));
+  m.hidden = false;
+}
+function ouvrirOverlay() { const l = urgences(); if (l.length) overlay(l, 0); }
 function infoVehicule(v, a) {
   return v.kmSem > 0 ? '≈ ' + nb(actuelC(v, a)) + ' km (estimé, relevé : ' + nb(v.kmActuel) + ' km le ' + jm(v.kmDate, a) + ') · ≈ ' + nb(v.kmSem) + ' km/semaine'
     : nb(v.kmActuel) + ' km (relevé le ' + jm(v.kmDate, a) + ')';
@@ -217,6 +237,9 @@ function fermer() { const m = document.getElementById('modal'); m.hidden = true;
 function modal(...kids) { const m = document.getElementById('modal'); m.replaceChildren(h('div', { class: 'b' }, ...kids)); m.hidden = false; }
 function confirmer(msg, oui) {
   modal(h('p', {}, msg), h('div', { class: 'acts' }, h('button', { onclick: fermer }, 'Non'), h('button', { onclick: () => { fermer(); oui(); } }, 'Oui')));
+}
+function confirmer2(titre, msg, oui, non) {
+  modal(h('h2', {}, titre), h('p', {}, msg), h('div', { class: 'acts' }, h('button', { onclick: () => { fermer(); if (non) non(); } }, 'Annuler'), h('button', { onclick: () => { fermer(); oui(); } }, 'Confirmer')));
 }
 function saisie(titre, init, ok) {
   const e = h('input', { type: 'text', value: init, autocapitalize: 'sentences' });
@@ -284,15 +307,23 @@ function caseCoche(lab, coche) {
 }
 
 // ---------- écrans ----------
+function carteAccueil(nom, emo, pt, clic, long) {
+  const e = tiroir(nom, null, '', clic, long, pt);
+  e.className = 'tiroir accueil'; e.querySelector('.n').replaceChildren(...[h('span', {}, nom), emo ? h('span', { class: 'em' }, emo) : null].filter(Boolean));
+  e.querySelector('.h').remove(); if (!pt) e.querySelector('.pt').remove();
+  return e;
+}
 function accueil() {
-  const p = page('Qdjar Qdjar', false), a = auj();
-  p.append(h('div', { class: 'onglets' }, ['Tous', 'Pro', 'Perso'].map((n, i) => h('button', { class: i === onglet ? 'on' : '', onclick: () => { onglet = i; rafraichir(); } }, n))));
-  enfants(0).filter(r => onglet === 0 || (onglet === 1) === (r.nom.toLowerCase() === 'travail')).forEach(r =>
-    p.append(tiroir(emojiDossier(r) + '  ' + r.nom, resume(r.id), '', () => aller(() => dossierEcran(r.id)), null, pointDossier(r))));
+  const p = page('Qdjar Qdjar', false);
+  const rac = enfants(0), ordre = [];
+  PRINC.forEach(n => { const r = rac.find(x => x.nom.toLowerCase() === n.toLowerCase()); if (r) ordre.push(r); });
+  const nStd = ordre.length; rac.forEach(r => { if (!ordre.includes(r)) ordre.push(r); });
+  ordre.forEach((r, k) => p.append(carteAccueil(r.nom, emojiDossier(r), pointDossier(r), () => aller(() => dossierEcran(r.id)), k >= nStd ? () => actionsDossier(r.id) : null)));
+  p.append(carteAccueil('➕  Ajouter un tiroir', '', null, () => saisie('Nom du tiroir', '', n => { ajoutDossier(0, n); sauver(); rafraichir(); })));
   p.append(btn('À venir', 'vert', () => aller(() => avenir(0))));
   if (aDesExemples()) p.append(btn('Effacer les exemples', 'poignee', () => confirmer('Effacer tous les exemples fictifs ? Ce que vous avez ajouté vous-même est conservé.', () => { effacerExemples(); rafraichir(); toast('Exemples effacés.'); })));
   else p.append(btn('Remettre les exemples', 'poignee', () => { exemples(); sauver(); rafraichir(); }));
-  p.append(h('p', { class: 'petit' }, 'Les données restent sur cet appareil (navigateur). Pour une vraie surveillance avec alarmes, utilisez l\'appli Android.'));
+  p.append(h('p', { class: 'petit' }, 'Les données restent sur cet appareil (navigateur). Le widget, « Ne pas déranger » et les notifications existent seulement dans l\'appli Android.'));
 }
 
 function dossierEcran(id) {
@@ -304,7 +335,7 @@ function dossierEcran(id) {
   const sous = s => tiroir(emojiDossier(s) + '  ' + s.nom, (s.vehicule ? infoVehicule(s, a) + '\n' : '') + resume(s.id), '', () => aller(() => dossierEcran(s.id)), () => actionsDossier(s.id), pointDossier(s));
   enfants(id).filter(s => !voitures || s.vehicule).forEach(s => p.append(sous(s)));
   if (voitures) enfants(id).filter(s => !s.vehicule).forEach(s => p.append(sous(s)));
-  itemsDe(id).forEach(it => p.append(tiroir(emoji(it) + '  ' + it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)), null, couleur(it, a), alerte(it, a) === 2 ? [estK(it) ? '✓ Fait' : '✓ Payé', () => marquerFait(it)] : null)));
+  itemsDe(id).forEach(it => p.append(tiroir(emoji(it) + '  ' + it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)), null, couleur(it, a), alerte(it, a) === 2 ? ['Urgent', () => marquerFait(it)] : null)));
   if (voitures) {
     if (!enfants(id).length) p.append(h('p', { class: 't' }, "Aucun véhicule pour l'instant."));
     if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));
@@ -367,7 +398,7 @@ function avenir(rac) {
     p.append(h('div', { class: 'lig u' + u, role: 'button', tabindex: 0, onclick: () => aller(() => detail(it.id)) },
       h('span', { class: 'pt ' + TEINTES[u] }),
       h('div', { class: 'tx' }, h('span', { class: 'd' }, d + ' :'), h('b', {}, act + '  ' + emoji(it))),
-      u === 2 ? h('button', { class: 'rapide', onclick: ev => { ev.stopPropagation(); marquerFait(it); } }, estK(it) ? '✓ Fait' : '✓ Payé') : null));
+      u === 2 ? h('button', { class: 'rapide', onclick: ev => { ev.stopPropagation(); marquerFait(it); } }, 'Urgent') : null));
   });
 }
 
@@ -392,7 +423,7 @@ function detail(id) {
     if (it.lien) L.push(ligneDetail('🔗', 'Lien', it.lien));
   }
   p.append(h('div', { class: 'carte' }, L));
-  p.append(btn(estK(it) ? 'Fait — ✓ Marquer comme Fait' : 'Payé / Fait — ✓ Marquer comme Payé', 'vert', () => marquerFait(it)));
+  p.append(btn(alerte(it, a) === 2 ? 'Urgent' : 'Marquer comme fait', alerte(it, a) === 2 ? 'rouge' : 'vert', () => marquerFait(it)));
   if (!estK(it) && it.lien) p.append(btn('Payer en ligne (navigateur)', 'teal', () => window.open(it.lien.includes('://') ? it.lien : 'https://' + it.lien, '_blank', 'noopener')));
   if (estK(it)) {
     const km = champ(p, estime(it) ? "Vrai kilométrage du compteur (remplace l'estimation" + (veh ? ', met à jour tout le véhicule)' : ')')
@@ -429,6 +460,10 @@ function formulaire(itemId, dossierId, type) {
     });
   } else {
     interv = champ(p, 'Tous les combien de km ? (ex. 10000)', it.intervalle, 'num');
+    if (!ex && veh) {
+      p.append(h('p', { class: 'petit' }, 'Modèles proposés (touche pour remplir) :'));
+      p.append(h('div', { class: 'modeles' }, [['Vidange', 10000], ['Huile de boîte', 40000], ['Chaîne / courroie', 70000]].map(([n, v]) => h('button', { class: 'poignee', onclick: () => { nom.value = n; interv.value = v; } }, n + '\n' + nb(v) + ' km'))));
+    }
     kd = champ(p, 'Kilométrage au dernier entretien', it.kmDernier, 'num');
     if (!veh) {
       ka = champ(p, estime(it) ? 'Dernier kilométrage relevé (réel)' : 'Kilométrage actuel', it.kmActuel, 'num');
@@ -473,4 +508,5 @@ charger();
 pile.push(accueil);
 history.replaceState({ i: 1 }, '');
 accueil();
+ouvrirOverlay();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});

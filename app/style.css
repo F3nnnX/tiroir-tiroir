@@ -27,7 +27,7 @@ button.retour{display:inline-block;width:auto;margin-top:0;padding:7px 20px;font
 .tiroir .s{font-size:15px;color:#5B5E7A;margin-top:6px;white-space:pre-line}
 .tiroir .h{width:70px;height:5px;border-radius:6px;background:#D8DCE8;margin:12px auto 0}
 .pt{position:absolute;top:14px;right:14px;width:18px;height:18px;border-radius:50%;background:#9E9E9E}
-.pt.rouge{background:#E53935}.pt.orange{background:#FB8C00}.pt.vertok{background:#4CAF50}.pt.cyan{background:#00BCD4}.pt.bleu{background:#2196F3}.pt.gris{background:#9E9E9E}
+.pt.rouge{background:#E53935}.pt.orange{background:#FB8C00}.pt.vertok{background:#4CAF50}.pt.gris{background:#9E9E9E}
 .rapide{position:absolute;right:12px;bottom:10px;width:auto;margin:0;padding:7px 16px;font-size:14px;background:#00A86B}
 .tiroir:has(.rapide) .h{margin-top:26px}
 .statut{margin-top:14px;padding:16px 18px;border-radius:16px;color:#fff;font-size:22px;font-weight:800;background:#9E9E9E;box-shadow:0 4px 12px rgba(0,0,0,.05)}
@@ -62,3 +62,18 @@ input[type=text],input[type=number],input[type=date],input[type=url],input:not([
 .lig .rapide{position:static;flex:none}
 .lig.u1{border-left-color:#FB8C00}.lig.u1 .d{color:#FB8C00}
 .lig.u2{border-left-color:#E53935}.lig.u2 .d{color:#E53935}
+
+.tiroir.accueil{padding:22px 52px 22px 20px}
+.tiroir.accueil .n{display:flex;align-items:center;gap:10px}
+.tiroir.accueil .em{font-size:24px}
+.tiroir.accueil .pt{top:50%;transform:translateY(-50%);right:18px;width:22px;height:22px}
+.statut.vertok{background:#4CAF50}
+#modal .ov{max-width:380px}
+#modal .ov .ovt{font-size:13px;font-weight:800;color:#E53935;letter-spacing:.5px}
+#modal .ov .ovn{font-size:26px;font-weight:800;margin-top:8px}
+#modal .ov .ovs{font-size:18px;font-weight:700;margin-top:8px}
+#modal .ov .ovs.rouge{color:#E53935}#modal .ov .ovs.orange{color:#FB8C00}
+#modal .ov button{width:100%;margin-top:14px;padding:15px;border-radius:40px;font-size:18px;color:#fff}
+#modal .ov button.contour{color:#1A1C3B}
+#badge{position:fixed;left:50%;top:40%;transform:translateX(-50%);background:#4CAF50;color:#fff;font-size:28px;font-weight:800;padding:16px 32px;border-radius:40px;z-index:30;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.modeles{display:flex;gap:6px}.modeles button{margin-top:6px;padding:8px 4px;font-size:13px;border-radius:12px;white-space:pre-line}
