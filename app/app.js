@@ -30,9 +30,9 @@ function num(s) { s = String(s || '').replace(/[^0-9]/g, ''); if (s.length > 12)
 let D = null;
 function sauver() { try { localStorage.setItem(CLE, JSON.stringify(D)); } catch (e) { /* stockage plein ou refusé */ } }
 function charger() {
-  try { const t = localStorage.getItem(CLE); if (t) { const o = JSON.parse(t); if (o && o.dossiers && o.items) { D = o; return; } } } catch (e) { /* corrompu : on repart */ }
+  try { const t = localStorage.getItem(CLE); if (t) { const o = JSON.parse(t); if (o && o.dossiers && o.items) { D = o; if (!D.dossiers.some(x => x.parent === 0 && x.nom.toLowerCase() === 'santé')) { ajoutDossier(0, 'Santé'); sauver(); } return; } } } catch (e) { /* corrompu : on repart */ }
   D = { suivant: 1, dossiers: [], items: [] };
-  ['Maison', 'Travail', 'Voiture', 'Autre'].forEach(n => ajoutDossier(0, n));
+  ['Maison', 'Travail', 'Voiture', 'Santé', 'Autre'].forEach(n => ajoutDossier(0, n));
   exemples(); sauver();
 }
 function ajoutDossier(parent, nom, ex) {
@@ -158,12 +158,39 @@ function ligne(it, a) {         // [date, action] : « 28 octobre : Agrément Sa
   if (q === null) return ['à ' + nb(it.kmDernier + it.intervalle) + ' km', it.nom + suf];
   return [jm(q, a), it.nom + suf];
 }
-function couleur(it, a) { if (retard(it, a)) return 'rouge'; const n = niveau(it, a); return n !== RIEN && urgent(it, n) ? 'orange' : ''; }
+const alerte = (it, a) => { if (retard(it, a)) return 2; if (estK(it)) return reste(it, a) <= it.s2 ? 2 : reste(it, a) <= it.s1 ? 1 : 0; const j = jours(it, a); return j < 7 ? 2 : j <= 15 ? 1 : 0; };
+const TEINTES = ['gris', 'orange', 'rouge'];
+const couleur = (it, a) => TEINTES[alerte(it, a)];
+function emoji(it) {
+  const n = it.nom.toLowerCase();
+  const t = [['sonelgaz', '⚡'], ['électr', '⚡'], ['elec', '⚡'], ['gaz', '🔥'], ['eau', '💧'], ['seaal', '💧'], ['internet', '🌐'], ['wifi', '🌐'], ['téléphone', '📱'], ['telephone', '📱'], ['mobile', '📱'], ['loyer', '🏠'], ['assurance', '🛡️'], ['vidange', '🛢️'], ['pneu', '🛞'], ['contrôle', '🔧'], ['controle', '🔧'], ['distribution', '⚙️'], ['impôt', '🧾'], ['impot', '🧾'], ['taxe', '🧾'], ['médecin', '🩺'], ['dent', '🦷'], ['vaccin', '💉']];
+  for (const x of t) if (n.includes(x[0])) return x[1];
+  return estK(it) ? '🚗' : '📌';
+}
+function emojiDossier(r) {
+  const n = r.nom.toLowerCase();
+  if (r.vehicule || n === 'voiture') return '🚗';
+  const t = [['maison', '🏠'], ['travail', '💼'], ['santé', '🩺'], ['sante', '🩺'], ['autre', '📦'], ['facture', '🧾'], ['entretien', '🔧'], ['assurance', '🛡️'], ['impôt', '🧾'], ['banque', '🏦']];
+  for (const x of t) if (n.includes(x[0])) return x[1];
+  return '📁';
+}
 function resume(id) {
   const l = sousArbre(id), a = auj(), r = l.filter(x => retard(x, a)).length;
-  return l.length === 0 ? 'Vide' : pl(l.length, 'élément') + (r > 0 ? ' · ' + r + ' en retard' : '');
+  if (!l.length) return 'Vide';
+  const best = l.reduce((m, x) => score(x, a) < score(m, a) ? x : m);
+  const n = pl(l.length, 'élément') + (r > 0 ? ' · ' + r + ' en retard' : '');
+  const [d, act] = ligne(best, a);
+  return alerte(best, a) > 0 || r > 0 ? d + ' · ' + act + '\n' + n : n;
 }
-const couleurDossier = id => sousArbre(id).some(x => retard(x, auj())) ? 'rouge' : '';
+const couleurDossier = id => TEINTES[Math.max(0, ...sousArbre(id).map(x => alerte(x, auj())))];
+const POINTS = { maison: 'vertok', travail: 'cyan', voiture: 'orange', 'santé': 'bleu', sante: 'bleu' };
+const pointDossier = r => r.parent === 0 ? (POINTS[r.nom.toLowerCase()] || 'gris') : couleurDossier(r.id);
+let onglet = 0;
+function marquerFait(it) {
+  const a = auj();
+  const suite = estK(it) ? 'Le prochain sera à ' + nb(actuel(it, a) + it.intervalle) + ' km.' : 'La prochaine échéance sera le ' + fmt(suivant(it)) + '.';
+  confirmer('Marquer « ' + it.nom + ' » comme ' + (estK(it) ? 'fait' : 'payé') + ' ? ' + suite, () => { paye(it); sauver(); rafraichir(); });
+}
 function infoVehicule(v, a) {
   return v.kmSem > 0 ? '≈ ' + nb(actuelC(v, a)) + ' km (estimé, relevé : ' + nb(v.kmActuel) + ' km le ' + jm(v.kmDate, a) + ') · ≈ ' + nb(v.kmSem) + ' km/semaine'
     : nb(v.kmActuel) + ' km (relevé le ' + jm(v.kmDate, a) + ')';
@@ -205,9 +232,11 @@ function choix(titre, libs, cb) {
 document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') fermer(); });
 
 const btn = (s, cl, f) => h('button', { class: cl || '', onclick: f }, s);
-function tiroir(titre, sous, cl, clic, long) {
-  const e = h('div', { class: 'tiroir ' + (cl || ''), role: 'button', tabindex: 0 },
-    h('div', { class: 'n' }, titre), sous ? h('div', { class: 's' }, sous) : null, h('div', { class: 'h' }));
+function tiroir(titre, sous, cl, clic, long, pt, rapide) {
+  const e = h('div', { class: 'tiroir ' + (cl && cl !== 'gris' ? 'b-' + cl : ''), role: 'button', tabindex: 0 },
+    h('div', { class: 'n' }, titre), sous ? h('div', { class: 's' }, sous) : null, h('div', { class: 'h' }),
+    h('span', { class: 'pt ' + (pt || cl || 'gris') }),
+    rapide ? h('button', { class: 'rapide', onclick: ev => { ev.stopPropagation(); rapide[1](); } }, rapide[0]) : null);
   let timer = null, fait = false;
   const stop = () => clearTimeout(timer);
   if (long) {
@@ -232,9 +261,10 @@ window.addEventListener('popstate', e => {
   if (pile.length) montrer();
 });
 
-function page(titre, avecRetour) {
+function page(titre, avecRetour, ariane) {
   const p = APP(); p.replaceChildren(); document.documentElement.classList.remove('epure');
-  if (avecRetour) p.append(btn('‹ Retour', 'poignee', () => retour(1)));
+  if (avecRetour) p.append(h('button', { class: 'retour', onclick: () => retour(1) }, '‹  Retour'));
+  if (ariane) p.append(h('p', { class: 'petit ariane' }, ariane));
   p.append(h('h1', {}, titre));
   return p;
 }
@@ -255,13 +285,10 @@ function caseCoche(lab, coche) {
 
 // ---------- écrans ----------
 function accueil() {
-  const p = page('Tiroir Tiroir', false), a = auj();
-  const proches = D.items.filter(x => couleur(x, a)).sort((x, y) => score(x, a) - score(y, a));
-  if (proches.length) {
-    p.append(h('p', { class: 't', style: 'font-weight:bold;margin-top:14px' }, 'À surveiller'));
-    proches.forEach(it => p.append(tiroir(it.nom, chemin(it.dossier) + '\n' + statut(it, a), couleur(it, a), () => aller(() => detail(it.id)))));
-  }
-  enfants(0).forEach(r => p.append(tiroir(r.nom, resume(r.id), couleurDossier(r.id), () => aller(() => dossierEcran(r.id)))));
+  const p = page('Qdjar Qdjar', false), a = auj();
+  p.append(h('div', { class: 'onglets' }, ['Tous', 'Pro', 'Perso'].map((n, i) => h('button', { class: i === onglet ? 'on' : '', onclick: () => { onglet = i; rafraichir(); } }, n))));
+  enfants(0).filter(r => onglet === 0 || (onglet === 1) === (r.nom.toLowerCase() === 'travail')).forEach(r =>
+    p.append(tiroir(emojiDossier(r) + '  ' + r.nom, resume(r.id), '', () => aller(() => dossierEcran(r.id)), null, pointDossier(r))));
   p.append(btn('À venir', 'vert', () => aller(() => avenir(0))));
   if (aDesExemples()) p.append(btn('Effacer les exemples', 'poignee', () => confirmer('Effacer tous les exemples fictifs ? Ce que vous avez ajouté vous-même est conservé.', () => { effacerExemples(); rafraichir(); toast('Exemples effacés.'); })));
   else p.append(btn('Remettre les exemples', 'poignee', () => { exemples(); sauver(); rafraichir(); }));
@@ -270,29 +297,33 @@ function accueil() {
 
 function dossierEcran(id) {
   const cur = dossier(id); if (!cur) { retour(1); return; }
-  const p = page(chemin(id), true), a = auj();
+  const p = page(chemin(id), true, cur.parent === 0 ? chemin(id) + ' › Qdjar Qdjar' : null), a = auj();
   const voitures = cur.parent === 0 && cur.nom.toLowerCase() === 'voiture';
   if (cur.vehicule) p.append(h('p', { class: 't' }, infoVehicule(cur, a)));
   // Niveau « Voiture » : les véhicules seulement (d'anciens éléments / sous-tiroirs éventuels restent visibles en dessous).
-  const sous = s => tiroir(s.nom, (s.vehicule ? infoVehicule(s, a) + '\n' : '') + resume(s.id), couleurDossier(s.id), () => aller(() => dossierEcran(s.id)), () => actionsDossier(s.id));
+  const sous = s => tiroir(emojiDossier(s) + '  ' + s.nom, (s.vehicule ? infoVehicule(s, a) + '\n' : '') + resume(s.id), '', () => aller(() => dossierEcran(s.id)), () => actionsDossier(s.id), pointDossier(s));
   enfants(id).filter(s => !voitures || s.vehicule).forEach(s => p.append(sous(s)));
   if (voitures) enfants(id).filter(s => !s.vehicule).forEach(s => p.append(sous(s)));
-  itemsDe(id).forEach(it => p.append(tiroir(it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)))));
+  itemsDe(id).forEach(it => p.append(tiroir(emoji(it) + '  ' + it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)), null, couleur(it, a), alerte(it, a) === 2 ? [estK(it) ? '✓ Fait' : '✓ Payé', () => marquerFait(it)] : null)));
   if (voitures) {
     if (!enfants(id).length) p.append(h('p', { class: 't' }, "Aucun véhicule pour l'instant."));
     if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));
-    p.append(btn('+ Ajouter un véhicule', '', () => aller(() => formVehicule(0, id))));
+    p.append(btn('+ Ajouter un véhicule', 'contour', () => aller(() => formVehicule(0, id))));
     return;
   }
   if (!enfants(id).length && !itemsDe(id).length) p.append(h('p', { class: 't' }, 'Ce tiroir est vide.'));
   const types = ['Échéance (facture, assurance, contrôle...)', 'Kilométrage (vidange, distribution...)'];
   const dansVehicule = !!vehiculeDe(id);
-  p.append(btn('+ Ajouter un élément', 'poignee', () => choix("Quel type d'élément ?",
+  const ajoutEl = () => choix("Quel type d'élément ?",
     dansVehicule ? types : types.concat(['Un sous-tiroir (pour regrouper)']),
-    w => { if (w === 2) saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); }); else aller(() => formulaire(0, id, w === 0 ? 'E' : 'K')); })));
+    w => { if (w === 2) saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); }); else aller(() => formulaire(0, id, w === 0 ? 'E' : 'K')); });
+  if (cur.parent === 0) {
+    p.append(btn('+ Ajouter une sous-catégorie', 'contour', () => saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); })));
+    p.append(btn('+ Ajouter un élément', 'contour', ajoutEl));
+  } else p.append(btn('+ Ajouter un élément', 'dore', ajoutEl));
   if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));
   if (cur.vehicule) p.append(h('a', { class: 'reglages', role: 'button', tabindex: 0, onclick: () => aller(() => formVehicule(id, cur.parent)) }, 'Réglages du véhicule'));
-  else if (cur.parent !== 0) p.append(h('p', { class: 'petit' }, 'Astuce : appui long sur un sous-tiroir pour le renommer ou le supprimer.'));
+  else if (cur.parent !== 0) p.append(h('p', { class: 'petit' }, '💡 Astuce : appui long sur un sous-tiroir pour le renommer ou le supprimer.'));
 }
 
 function actionsDossier(id) {
@@ -329,49 +360,50 @@ function formVehicule(id, parent) {
 
 function avenir(rac) {
   const r = dossier(rac), p = page(r ? 'À venir : ' + r.nom : 'À venir', true), a = auj();
-  document.documentElement.classList.add('epure');
   const l = sousArbre(rac).sort((x, y) => score(x, a) - score(y, a));
   if (!l.length) p.append(h('p', { class: 't' }, 'Rien à venir. Ajoutez des éléments dans les tiroirs.'));
   l.forEach(it => {
-    const u = urgence(it, a), [d, act] = ligne(it, a);
+    const u = alerte(it, a), [d, act] = ligne(it, a);
     p.append(h('div', { class: 'lig u' + u, role: 'button', tabindex: 0, onclick: () => aller(() => detail(it.id)) },
-      h('span', { class: 'd' }, d), ' : ', h('b', {}, act)));
+      h('span', { class: 'pt ' + TEINTES[u] }),
+      h('div', { class: 'tx' }, h('span', { class: 'd' }, d + ' :'), h('b', {}, act + '  ' + emoji(it))),
+      u === 2 ? h('button', { class: 'rapide', onclick: ev => { ev.stopPropagation(); marquerFait(it); } }, estK(it) ? '✓ Fait' : '✓ Payé') : null));
   });
 }
 
+function ligneDetail(ic, lab, val) { return h('div', { class: 'ld' }, h('span', { class: 'ic' }, ic), h('div', {}, h('small', {}, lab), h('b', {}, val))); }
 function detail(id) {
   const it = item(id); if (!it) { retour(1); return; }
-  const a = auj(), p = page(it.nom, true), k = cpt(it), veh = vehiculeDe(it.dossier);
-  p.append(h('p', { class: 't', style: 'font-size:16px' }, chemin(it.dossier)));
-  p.append(h('div', { class: 'statut ' + couleur(it, a) }, statut(it, a)));
-  let s;
+  const a = auj(), p = page(emoji(it) + '  ' + it.nom, true, chemin(it.dossier)), k = cpt(it), veh = vehiculeDe(it.dossier);
+  const al = alerte(it, a);
+  p.append(h('div', { class: 'statut ' + (al ? TEINTES[al] : 'ok') }, statut(it, a)));
+  const L = [];
   if (estK(it)) {
-    s = (veh ? 'Véhicule : ' + veh.nom + '\n' : '') + 'Intervalle : ' + nb(it.intervalle) + ' km\n' + 'Dernier entretien à : ' + nb(it.kmDernier) + ' km\n'
-      + (estime(it) ? 'Kilométrage : ≈ ' + nb(actuel(it, a)) + ' km (estimé)\nDernier relevé réel : ' + nb(k.kmActuel) + ' km le ' + jm(k.kmDate, a) + '\nRoule environ ' + nb(k.kmSem) + ' km par semaine\n'
-        : 'Kilométrage actuel : ' + nb(k.kmActuel) + ' km\n')
-      + 'Prochain à : ' + nb(it.kmDernier + it.intervalle) + ' km\n' + 'Alertes à ' + nb(it.s1) + ' et ' + nb(it.s2) + ' km\n'
-      + (it.question ? 'Question chaque semaine : oui' : 'Question chaque semaine : non');
+    if (veh) L.push(ligneDetail('🚗', 'Véhicule', veh.nom));
+    L.push(ligneDetail('🔁', 'Intervalle', nb(it.intervalle) + ' km'), ligneDetail('🛠️', 'Dernier entretien à', nb(it.kmDernier) + ' km'),
+      ligneDetail('🧭', estime(it) ? 'Kilométrage (estimé, relevé ' + nb(k.kmActuel) + ' km le ' + jm(k.kmDate, a) + ')' : 'Kilométrage actuel', (estime(it) ? '≈ ' : '') + nb(actuel(it, a)) + ' km'),
+      ligneDetail('📅', 'Prochain à', nb(it.kmDernier + it.intervalle) + ' km'),
+      ligneDetail('🔔', 'Alertes à', nb(it.s1) + ' et ' + nb(it.s2) + ' km' + (it.question ? ' · question chaque semaine' : '')));
   } else {
-    s = 'Revient tous les ' + it.periode + (it.mois ? ' mois' : ' jours') + '\n' + 'Prochaine échéance : ' + fmt(it.ref) + '\n'
-      + (it.prec ? 'Précédente : ' + fmt(it.prec) + '\n' : '') + (it.montant > 0 ? 'Montant estimé : ' + nb(it.montant) + ' DA\n' : '')
-      + 'Rappels : ' + rappels(it) + (it.lien ? '\nLien : ' + it.lien : '');
+    L.push(ligneDetail('🔁', 'Récurrence', 'Tous les ' + it.periode + (it.mois ? ' mois' : ' jours')), ligneDetail('📅', 'Prochaine échéance', fmt(it.ref)));
+    if (it.prec) L.push(ligneDetail('↩️', 'Précédente', fmt(it.prec)));
+    if (it.montant > 0) L.push(ligneDetail('💰', 'Montant estimé', nb(it.montant) + ' DA'));
+    L.push(ligneDetail('🔔', 'Rappels', rappels(it)));
+    if (it.lien) L.push(ligneDetail('🔗', 'Lien', it.lien));
   }
-  p.append(h('p', { class: 't' }, s));
-  p.append(btn(estK(it) ? 'Fait' : 'Payé / Fait', 'vert', () => {
-    const suite = estK(it) ? 'Le prochain sera à ' + nb(actuel(it, a) + it.intervalle) + ' km.' : 'La prochaine échéance sera le ' + fmt(suivant(it)) + '.';
-    confirmer('Marquer « ' + it.nom + ' » comme ' + (estK(it) ? 'fait' : 'payé') + ' ? ' + suite, () => { paye(it); sauver(); rafraichir(); });
-  }));
-  if (!estK(it) && it.lien) p.append(btn('Payer en ligne (navigateur)', '', () => window.open(it.lien.includes('://') ? it.lien : 'https://' + it.lien, '_blank', 'noopener')));
+  p.append(h('div', { class: 'carte' }, L));
+  p.append(btn(estK(it) ? 'Fait — ✓ Marquer comme Fait' : 'Payé / Fait — ✓ Marquer comme Payé', 'vert', () => marquerFait(it)));
+  if (!estK(it) && it.lien) p.append(btn('Payer en ligne (navigateur)', 'teal', () => window.open(it.lien.includes('://') ? it.lien : 'https://' + it.lien, '_blank', 'noopener')));
   if (estK(it)) {
     const km = champ(p, estime(it) ? "Vrai kilométrage du compteur (remplace l'estimation" + (veh ? ', met à jour tout le véhicule)' : ')')
       : 'Kilométrage actuel' + (veh ? ' (met à jour tout le véhicule)' : ''), estime(it) ? '' : k.kmActuel, 'num');
-    p.append(btn('Enregistrer le kilométrage', '', () => {
+    p.append(btn('Enregistrer le kilométrage', 'teal', () => {
       if (!km.value.trim()) { toast('Tape le kilométrage du compteur.'); return; }
       const info = releve(k, num(km.value), auj()); sauver();
       if (info) toast(info); rafraichir();
     }));
   }
-  p.append(btn('Modifier', 'poignee', () => aller(() => formulaire(id, it.dossier, it.type))));
+  p.append(btn('✏️  Modifier', 'poignee', () => aller(() => formulaire(id, it.dossier, it.type))));
 }
 
 function formulaire(itemId, dossierId, type) {
