@@ -50,6 +50,7 @@ public class Principal extends Activity {
     private boolean surAccueil;
     private LinearLayout col;
     private Dialog overlayOuvert;
+    private boolean forceHebdo; // tap sur la notification du dimanche
     private int forceOverlay; // id d'un élément à montrer en overlay (tap sur le widget)
 
     /** Une urgence à montrer en overlay : un élément rouge, ou un relevé km dû (véhicule v, ou élément km isolé it). */
@@ -78,6 +79,7 @@ public class Principal extends Activity {
         setIntent(in);
         depuis(in);
         if (forceOverlay != 0 && overlayOuvert == null) ouvrirOverlay();
+        else if (forceHebdo && overlayOuvert == null) ouvrirOverlay();
     }
 
     @Override protected void onStart() {
@@ -92,6 +94,7 @@ public class Principal extends Activity {
         if (ov != 0) forceOverlay = ov;
         int id = in.getIntExtra("item", 0);
         in.removeExtra("item");
+        if (in.getBooleanExtra("hebdo", false)) { in.removeExtra("hebdo"); forceHebdo = true; }
         if (id != 0 && d.item(id) != null) aller(() -> detail(id));
         int idv = in.getIntExtra("veh", 0);
         in.removeExtra("veh");
@@ -439,6 +442,10 @@ public class Principal extends Activity {
     }
 
     private void ouvrirOverlay() {
+        if (forceHebdo || !getSharedPreferences("tt", 0).getString("hebdo_ids", "").isEmpty()) { // saisie du dimanche en attente
+            forceHebdo = false;
+            if (hebdo()) return;
+        }
         if (forceOverlay != 0) {
             Item it = d.item(forceOverlay);
             forceOverlay = 0;
@@ -453,6 +460,81 @@ public class Principal extends Activity {
         }
         List<Alerte> l = urgences();
         if (!l.isEmpty()) overlay(l, 0);
+    }
+
+    /** v1.6 : écran du dimanche 11 h. Un champ compteur + case « Rappeler demain » par véhicule. Renvoie false s'il n'y a rien à montrer. */
+    private boolean hebdo() {
+        String ids = getSharedPreferences("tt", 0).getString("hebdo_ids", "");
+        ArrayList<Dossier> vs = new ArrayList<>();
+        for (String x : ids.split(",")) {
+            try { Dossier v = d.dossier(Integer.parseInt(x.trim())); if (v != null && v.vehicule) vs.add(v); } catch (Exception e) { /* ignoré */ }
+        }
+        if (vs.isEmpty()) return false;
+        Dialog g = new Dialog(this);
+        g.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        g.setCancelable(false);
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackground(fond(BLANC, 24));
+        c.setPadding(dp(22), dp(20), dp(22), dp(20));
+        c.addView(txt("Quels kilométrages ont atteint vos véhicules ?", 20, TEXTE, true));
+        final ArrayList<EditText> champs = new ArrayList<>();
+        final ArrayList<CheckBox> cases = new ArrayList<>();
+        for (Dossier v : vs) {
+            c.addView(txt("🚗  " + v.nom + "  (dernier relevé : " + Item.nb(v.c.kmActuel) + " km)", 16, TEXTE, true));
+            EditText e = new EditText(this);
+            e.setInputType(InputType.TYPE_CLASS_NUMBER);
+            e.setTextSize(20);
+            e.setTextColor(TEXTE);
+            e.setHint("km au compteur");
+            c.addView(e);
+            CheckBox cb = new CheckBox(this);
+            cb.setText("Rappeler demain");
+            cb.setTextColor(SOUS);
+            c.addView(cb);
+            champs.add(e);
+            cases.add(cb);
+        }
+        c.addView(btn("Valider", VERT, BLANC, x -> {
+            long dem = LocalDate.now().toEpochDay() + 1;
+            android.content.SharedPreferences.Editor ed = getSharedPreferences("tt", 0).edit();
+            String info = null;
+            for (int i = 0; i < vs.size(); i++) {
+                Dossier v = vs.get(i);
+                if (cases.get(i).isChecked()) { ed.putLong("rapp_" + v.id, dem); continue; }
+                ed.remove("rapp_" + v.id);
+                String t = champs.get(i).getText().toString().replaceAll("[^0-9]", "");
+                if (t.isEmpty() || t.length() > 7) continue;
+                String r = v.c.releve(Long.parseLong(t), LocalDate.now());
+                if (r != null) info = r;
+            }
+            ed.remove("hebdo_ids").apply();
+            d.sauver();
+            Rappels.verifier(this, false);
+            if (info != null) toast(info);
+            overlayOuvert = null;
+            g.dismiss();
+            if (!pile.isEmpty()) rafraichir();
+        }));
+        c.addView(btnContour("Plus tard", x -> {
+            getSharedPreferences("tt", 0).edit().remove("hebdo_ids").apply();
+            overlayOuvert = null;
+            g.dismiss();
+        }));
+        ScrollView sv = new ScrollView(this);
+        sv.addView(c);
+        FrameLayout f = new FrameLayout(this);
+        f.setPadding(dp(18), 0, dp(18), 0);
+        f.addView(sv);
+        g.setContentView(f);
+        Window w = g.getWindow();
+        w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        w.setDimAmount(0.65f);
+        w.setLayout(LARGE, HAUT);
+        overlayOuvert = g;
+        g.show();
+        return true;
     }
 
     /** Carte modale sur fond assombri ; enchaîne les urgences l'une après l'autre. */
@@ -624,7 +706,9 @@ public class Principal extends Activity {
         for (Dossier s : d.enfants(id))
             if (voitures && !s.vehicule)
                 p.addView(tiroir(emojiDossier(s) + "  " + s.nom, resume(s.id), pastilleDossier(s), () -> aller(() -> dossier(s.id)), () -> actionsDossier(s.id)));
-        for (Item it : d.itemsDe(id)) {
+        List<Item> mes = d.itemsDe(id);
+        mes.sort((a, b) -> Double.compare(a.score(auj), b.score(auj))); // v1.6 : prochaine échéance d'abord
+        for (Item it : mes) {
             int al = it.alerte(auj);
             p.addView(carte(it.emoji() + "  " + it.nom, it.statut(auj), teinte(al), al > 0 ? teinte(al) : 0,
                     al == 2 ? "Urgent" : null, () -> marquerFait(it),
@@ -652,10 +736,8 @@ public class Principal extends Activity {
                                 }).show();
             }
         });
-        if (cur.parent == 0) { // « + Ajouter une sous-catégorie » (contour indigo) ; l'élément reste possible via le même bouton
-            p.addView(btnContour("+ Ajouter une sous-catégorie", v -> saisie("Nom du sous-tiroir", "", n -> { d.ajoutDossier(id, n); d.sauver(); dossier(id); })));
-            p.addView(btnContour("+ Ajouter un élément", v -> ajout.performClick()));
-        } else p.addView(ajout);
+        if (cur.parent == 0) p.addView(btnContour("+ Ajouter un élément", v -> ajout.performClick())); // v1.6 : plus de « + Ajouter une sous-catégorie »
+        else p.addView(ajout);
         if (!d.sousArbre(id).isEmpty()) p.addView(btn("À venir dans ce tiroir", VERT, BLANC, v -> aller(() -> avenir(id))));
         if (cur.vehicule) {
             TextView r = txt("Réglages du véhicule", 15, INDIGO, false);

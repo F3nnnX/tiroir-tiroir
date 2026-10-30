@@ -210,7 +210,32 @@ function overlay(l, i) {
     h('button', { class: 'contour', onclick: () => { localStorage.setItem(repKey(c), String(auj())); overlay(l, i + 1); } }, 'Reporter à plus tard')));
   m.hidden = false;
 }
-function ouvrirOverlay() { const l = urgences(); if (l.length) overlay(l, 0); }
+// v1.6 : saisie hebdomadaire des kilométrages (Android : notification chaque dimanche 11 h ; web : à l'ouverture, dimanche dès 11 h, ou #hebdo pour la voir)
+function hebdoDu() {
+  const n = new Date(), j = auj(), force = location.hash === '#hebdo';
+  if (!force && (n.getDay() !== 0 || n.getHours() < 11 || localStorage.getItem('tt-hebdo') === String(j))) return [];
+  return D.dossiers.filter(v => v.vehicule && (force || n.getDay() === 0 || Number(localStorage.getItem('tt-rapp-' + v.id)) <= j && localStorage.getItem('tt-rapp-' + v.id)));
+}
+function hebdo(vs) {
+  const champs = vs.map(v => h('input', { type: 'text', inputmode: 'numeric', pattern: '[0-9]*', placeholder: 'km au compteur' }));
+  const cases = vs.map(() => h('input', { type: 'checkbox' }));
+  const m = document.getElementById('modal');
+  m.replaceChildren(h('div', { class: 'b ov' },
+    h('div', { class: 'ovn ovq' }, 'Quels kilométrages ont atteint vos véhicules ?'),
+    ...vs.flatMap((v, i) => [h('div', { class: 'ovs' }, '🚗  ' + v.nom + '  (dernier relevé : ' + nb(v.kmActuel) + ' km)'), champs[i], h('label', { class: 'case' }, cases[i], 'Rappeler demain')]),
+    h('button', { class: 'vert', onclick: () => {
+      vs.forEach((v, i) => {
+        if (cases[i].checked) { localStorage.setItem('tt-rapp-' + v.id, String(auj() + 1)); return; }
+        localStorage.removeItem('tt-rapp-' + v.id);
+        const t = champs[i].value.replace(/[^0-9]/g, ''); if (!t || t.length > 7) return;
+        releve(v, Number(t), auj());
+      });
+      localStorage.setItem('tt-hebdo', String(auj())); sauver(); fermer(); rafraichir();
+    } }, 'Valider'),
+    h('button', { class: 'contour', onclick: () => { localStorage.setItem('tt-hebdo', String(auj())); fermer(); } }, 'Plus tard')));
+  m.hidden = false;
+}
+function ouvrirOverlay() { const v = hebdoDu(); if (v.length) { hebdo(v); return; } const l = urgences(); if (l.length) overlay(l, 0); }
 function infoVehicule(v, a) {
   return v.kmSem > 0 ? '≈ ' + nb(actuelC(v, a)) + ' km (estimé, relevé : ' + nb(v.kmActuel) + ' km le ' + jm(v.kmDate, a) + ') · ≈ ' + nb(v.kmSem) + ' km/semaine'
     : nb(v.kmActuel) + ' km (relevé le ' + jm(v.kmDate, a) + ')';
@@ -335,7 +360,7 @@ function dossierEcran(id) {
   const sous = s => tiroir(emojiDossier(s) + '  ' + s.nom, (s.vehicule ? infoVehicule(s, a) + '\n' : '') + resume(s.id), '', () => aller(() => dossierEcran(s.id)), () => actionsDossier(s.id), pointDossier(s));
   enfants(id).filter(s => !voitures || s.vehicule).forEach(s => p.append(sous(s)));
   if (voitures) enfants(id).filter(s => !s.vehicule).forEach(s => p.append(sous(s)));
-  itemsDe(id).forEach(it => p.append(tiroir(emoji(it) + '  ' + it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)), null, couleur(it, a), alerte(it, a) === 2 ? ['Urgent', () => marquerFait(it)] : null)));
+  itemsDe(id).sort((x, y) => score(x, a) - score(y, a)).forEach(it => p.append(tiroir(emoji(it) + '  ' + it.nom, statut(it, a), couleur(it, a), () => aller(() => detail(it.id)), null, couleur(it, a), alerte(it, a) === 2 ? ['Urgent', () => marquerFait(it)] : null)));
   if (voitures) {
     if (!enfants(id).length) p.append(h('p', { class: 't' }, "Aucun véhicule pour l'instant."));
     if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));
@@ -349,7 +374,6 @@ function dossierEcran(id) {
     dansVehicule ? types : types.concat(['Un sous-tiroir (pour regrouper)']),
     w => { if (w === 2) saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); }); else aller(() => formulaire(0, id, w === 0 ? 'E' : 'K')); });
   if (cur.parent === 0) {
-    p.append(btn('+ Ajouter une sous-catégorie', 'contour', () => saisie('Nom du sous-tiroir', '', n => { ajoutDossier(id, n); sauver(); rafraichir(); })));
     p.append(btn('+ Ajouter un élément', 'contour', ajoutEl));
   } else p.append(btn('+ Ajouter un élément', 'dore', ajoutEl));
   if (sousArbre(id).length) p.append(btn('À venir dans ce tiroir', 'vert', () => aller(() => avenir(id))));

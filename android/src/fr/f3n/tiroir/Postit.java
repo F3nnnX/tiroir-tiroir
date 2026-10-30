@@ -37,6 +37,7 @@ public class Postit extends AppWidgetProvider {
         LocalDate auj = LocalDate.now();
         List<Item> l = new ArrayList<>(Donnees.get(c).items);
         l.sort((a, b) -> Double.compare(a.score(auj), b.score(auj)));
+        l.removeIf(x -> x.score(auj) > 10); // v1.6 : seulement J-10 et moins (retards inclus) ; km : ~50 km/jour ou estimation
         int[] rows = {id(c, "r1"), id(c, "r2"), id(c, "r3")}, dots = {id(c, "d1"), id(c, "d2"), id(c, "d3")}, ts = {id(c, "t1"), id(c, "t2"), id(c, "t3")};
         PendingIntent ouvrir = PendingIntent.getActivity(c, 900, new Intent(c, Principal.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -54,7 +55,7 @@ public class Postit extends AppWidgetProvider {
             } else if (i == 0) {
                 v.setViewVisibility(rows[i], View.VISIBLE);
                 v.setTextColor(dots[i], 0xFF4CAF50);
-                v.setTextViewText(ts[i], "Rien à signaler");
+                v.setTextViewText(ts[i], "Rien d'urgent ces jours-ci");
             } else v.setViewVisibility(rows[i], View.GONE);
         }
         return v;

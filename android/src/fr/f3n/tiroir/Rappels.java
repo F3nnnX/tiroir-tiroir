@@ -31,6 +31,43 @@ class Rappels {
         }
     }
 
+    /** v1.6 : chaque jour à 11 h ; le dimanche tous les véhicules, les autres jours seulement ceux « rappelés demain ». */
+    public static class Hebdo extends BroadcastReceiver {
+        @Override public void onReceive(Context c, Intent in) {
+            try {
+                programmerHebdo(c);
+                StringBuilder ids = new StringBuilder();
+                boolean dim = LocalDate.now().getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
+                long j = LocalDate.now().toEpochDay();
+                for (Dossier v : Donnees.get(c).dossiers) {
+                    if (!v.vehicule) continue;
+                    long rapp = c.getSharedPreferences("tt", 0).getLong("rapp_" + v.id, -1);
+                    if (dim || (rapp >= 0 && rapp <= j)) ids.append(ids.length() > 0 ? "," : "").append(v.id);
+                }
+                if (ids.length() == 0) return;
+                c.getSharedPreferences("tt", 0).edit().putString("hebdo_ids", ids.toString()).apply();
+                NotificationManager nm = c.getSystemService(NotificationManager.class);
+                canaux(c);
+                if (!nm.areNotificationsEnabled()) return;
+                Intent i = new Intent(c, Principal.class).putExtra("hebdo", true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                nm.notify(990001, new Notification.Builder(c, canal(c)).setSmallIcon(android.R.drawable.ic_menu_edit)
+                        .setContentTitle("Quels kilométrages ont atteint vos véhicules ?")
+                        .setContentText("Touchez pour saisir les compteurs.")
+                        .setContentIntent(PendingIntent.getActivity(c, 990001, i, IMM)).setAutoCancel(true).build());
+            } catch (Exception e) { /* ne jamais planter dans un récepteur */ }
+        }
+    }
+
+    /** Prochain passage à 11 h (inexact, tolère le mode Doze). */
+    static void programmerHebdo(Context c) {
+        LocalDateTime t = LocalDate.now().atTime(11, 0);
+        if (!t.isAfter(LocalDateTime.now())) t = t.plusDays(1);
+        long ms = t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        PendingIntent pi = PendingIntent.getBroadcast(c, 8, new Intent(c, Hebdo.class), IMM);
+        c.getSystemService(AlarmManager.class).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi);
+    }
+
     /** Réponse tapée directement dans la notification « À combien de km es-tu ? ». */
     public static class Reponse extends BroadcastReceiver {
         @Override public void onReceive(Context c, Intent in) {
@@ -97,6 +134,7 @@ class Rappels {
         long ms = t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         PendingIntent pi = PendingIntent.getBroadcast(c, 7, new Intent(c, Alarme.class), IMM);
         c.getSystemService(AlarmManager.class).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi);
+        programmerHebdo(c);
     }
 
     /**
