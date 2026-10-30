@@ -421,16 +421,6 @@ public class Principal extends Activity {
             a.it = x;
             if (!reportee(a.cle())) r.add(a);
         }
-        for (Dossier v : d.dossiers) {
-            if (!v.vehicule) continue;
-            boolean q = false;
-            for (Item x : d.kmDe(v)) q |= x.question;
-            if (!releveDu(v.c, q)) continue;
-            Alerte a = new Alerte();
-            a.v = v;
-            a.releve = true;
-            if (!reportee(a.cle())) r.add(a);
-        }
         for (Item x : d.items) {
             if (!x.km() || x.veh != null || !releveDu(x.c, x.question)) continue;
             Alerte a = new Alerte();

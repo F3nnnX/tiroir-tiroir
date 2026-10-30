@@ -161,13 +161,7 @@ class Rappels {
             }
             if (quotidien && ok) {
                 long j = auj.toEpochDay();
-                for (Dossier v : new ArrayList<>(d.dossiers)) { // 1 question par véhicule
-                    if (!v.vehicule || !aQuestion(d.kmDe(v))) continue;
-                    if (j - v.c.qDate < (v.c.estime() ? 28 : 7)) continue; // estimation : question toutes les 4 semaines
-                    question(c, v.id, v.nom, v.c, true, false);
-                    v.c.qDate = j;
-                    change = true;
-                }
+                // v1.6 : la question hebdomadaire des véhicules est remplacée par la saisie du dimanche 11 h (Hebdo)
                 for (Item it : d.items) { // élément km hors véhicule : sa propre question
                     if (!it.km() || it.veh != null || !it.question) continue;
                     if (j - it.c.qDate < (it.c.estime() ? 28 : 7)) continue;
